@@ -1,0 +1,20 @@
+# Banco de dados SQLite local (não subir seus dados reais)
+*.db
+*.db-wal
+*.db-shm
+
+# Arquivos temporários e PDFs enviados
+uploads/
+*.pdf
+
+# Python e Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv/
+venv/
+ENV/
+
+# VS Code
+.vscode/

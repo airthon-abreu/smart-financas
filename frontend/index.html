@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>SmartFinanças - Inteligência de Gastos</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { background-color: #080d1a; color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .card-cockpit { background: #0f172a; border: 1px solid #1e293b; border-radius: 14px; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0b1329; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+  </style>
+</head>
+<body class="p-4 md:p-8">
+  <div id="app" class="max-w-7xl mx-auto space-y-6">
+
+    <!-- CABEÇALHO -->
+    <header class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-5">
+      <div>
+        <h1 class="text-2xl font-black tracking-tight text-white flex items-center gap-2">
+          <span>⚡ Smart<span class="text-cyan-400">Finanças</span></span>
+          <span class="text-xs bg-slate-800 text-cyan-400 font-semibold px-2 py-0.5 rounded border border-slate-700">v2.0 PRO</span>
+        </h1>
+        <p class="text-xs text-slate-400 mt-1">Gestão, Filtros Livres & Projeção com Nomes Completos de Cartões</p>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <!-- SELETOR DE MÊS -->
+        <select v-if="meses.length > 0" v-model="mesSelecionado" @change="carregarDashboard" class="bg-slate-900 border border-slate-700 text-cyan-400 rounded-lg px-3 py-2 text-sm font-semibold outline-none cursor-pointer">
+          <option v-for="m in meses" :key="m" :value="m">{{ formatarMes(m) }}</option>
+        </select>
+
+        <!-- UPLOAD PDF -->
+        <label class="cursor-pointer bg-gradient-to-r from-sky-600 to-cyan-500 hover:opacity-90 text-slate-950 font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 shadow-lg shadow-cyan-500/20 transition">
+          <span>📂 Importar PDF</span>
+          <input type="file" accept="application/pdf" @change="enviarPdf" class="hidden" />
+        </label>
+      </div>
+    </header>
+
+    <div v-if="carregando" class="text-center py-12 text-slate-400 animate-pulse">Atualizando dados e inteligência financeira...</div>
+
+    <div v-else-if="dados.vazio" class="card-cockpit p-12 text-center text-slate-400 space-y-3">
+      <div class="text-4xl">📄</div>
+      <h3 class="text-lg font-bold text-white">Nenhum relatório importado ainda</h3>
+      <p class="text-sm">Clique em "Importar PDF" no topo para carregar seu relatório do Minhas Finanças.</p>
+    </div>
+
+    <div v-else class="space-y-6">
+
+      <!-- INSIGHTS NOTIFICAÇÕES -->
+      <div v-if="dados.insights.mensagens && dados.insights.mensagens.length > 0" class="grid gap-3">
+        <div v-for="(msg, idx) in dados.insights.mensagens" :key="idx" 
+             :class="['p-4 rounded-xl border flex items-start gap-3', 
+                      msg.tipo === 'positivo' ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300' : 'bg-amber-950/40 border-amber-500/30 text-amber-300']">
+          <span class="text-xl">{{ msg.tipo === 'positivo' ? '✨' : '⚠️' }}</span>
+          <div>
+            <h4 class="font-bold text-sm text-white">{{ msg.titulo }}</h4>
+            <p class="text-xs mt-0.5 opacity-90">{{ msg.texto }}</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- CARDS DE KPIS -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="card-cockpit p-5 border-cyan-500/20">
+          <span class="text-xs font-bold text-slate-400 uppercase">Total Geral do Mês</span>
+          <div class="text-2xl font-black text-cyan-400 mt-1">{{ formatarMoeda(dados.insights.total_geral) }}</div>
+          <span class="text-xs text-slate-500">Valor total consolidado</span>
+        </div>
+
+        <div class="card-cockpit p-5 border-emerald-500/20">
+          <span class="text-xs font-bold text-slate-400 uppercase">Custos Fixos</span>
+          <div class="text-2xl font-black text-emerald-400 mt-1">{{ formatarMoeda(dados.insights.fixas) }}</div>
+          <span class="text-xs text-slate-500">Moradia, Contas essenciais, etc.</span>
+        </div>
+
+        <div class="card-cockpit p-5 border-indigo-500/20">
+          <span class="text-xs font-bold text-slate-400 uppercase">Parcelamentos Ativos</span>
+          <div class="text-2xl font-black text-indigo-400 mt-1">{{ formatarMoeda(dados.insights.parceladas) }}</div>
+          <span class="text-xs text-slate-500">Comprometido em cartões e compras</span>
+        </div>
+
+        <div class="card-cockpit p-5 border-pink-500/20">
+          <span class="text-xs font-bold text-slate-400 uppercase">Gastos Variáveis</span>
+          <div class="text-2xl font-black text-pink-400 mt-1">{{ formatarMoeda(dados.insights.variaveis) }}</div>
+          <span class="text-xs text-slate-500">Consumo livre do mês</span>
+        </div>
+      </div>
+
+      <!-- GRÁFICOS: CATEGORIAS (NOMES COMPLETOS) + PROJEÇÃO (TOTAL COMBINADO) -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        <!-- GRÁFICO 1: CATEGORIAS / CARTÕES -->
+        <div class="card-cockpit p-5 flex flex-col justify-between">
+          <div class="flex justify-between items-start mb-3">
+            <div>
+              <h3 class="text-base font-bold text-white">Despesas por Cartão / Categoria</h3>
+              <p class="text-xs text-slate-400">Nomes completos com percentual e valores exatos</p>
+            </div>
+            <span class="text-xs bg-slate-800 text-cyan-400 px-2 py-1 rounded font-mono">{{ dados.insights.ranking_categoria.length }} categorias</span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+            <div class="h-60 relative">
+              <canvas id="graficoCategorias"></canvas>
+            </div>
+            
+            <!-- Lista detalhada com barras de progresso -->
+            <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
+              <div v-for="item in dados.insights.ranking_categoria" :key="item.categoria" 
+                   @click="filtroCategoria = (filtroCategoria === item.categoria ? '' : item.categoria)"
+                   class="p-2 rounded-lg bg-slate-900/60 border border-slate-800 hover:border-cyan-500/50 cursor-pointer transition text-xs">
+                <div class="flex justify-between items-center mb-1">
+                  <span class="font-bold text-white truncate max-w-[150px]" :title="item.categoria">{{ item.categoria }}</span>
+                  <span class="text-cyan-400 font-mono font-bold">{{ formatarMoeda(item.valor) }}</span>
+                </div>
+                <div class="flex justify-between text-[10px] text-slate-400 mb-1">
+                  <span>Proporção</span>
+                  <span>{{ item.pct }}%</span>
+                </div>
+                <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                  <div class="bg-cyan-400 h-full rounded-full" :style="{ width: item.pct + '%' }"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- GRÁFICO 2: PROJEÇÃO 12 MESES COM TOTAL COMBINADO -->
+        <div class="card-cockpit p-5 flex flex-col justify-between">
+          <div class="flex justify-between items-start mb-3">
+            <div>
+              <h3 class="text-base font-bold text-white">Projeção Mês a Mês (Fixos + Parcelas)</h3>
+              <p class="text-xs text-slate-400">A linha neon destaca o <strong class="text-cyan-400">Total Combinado</strong> decrescente</p>
+            </div>
+            <button @click="verDetalhesProjecao = !verDetalhesProjecao" class="text-xs text-cyan-400 hover:underline">
+              {{ verDetalhesProjecao ? 'Ocultar Valores' : 'Ver Valores Mês a Mês' }}
+            </button>
+          </div>
+
+          <div class="h-64 relative">
+            <canvas id="graficoProjecao"></canvas>
+          </div>
+
+          <!-- TABELA EXPANSÍVEL DE VALORES DA PROJEÇÃO -->
+          <div v-if="verDetalhesProjecao" class="mt-4 pt-4 border-t border-slate-800 max-h-48 overflow-y-auto">
+            <table class="w-full text-xs text-left">
+              <thead class="text-slate-400 bg-slate-900/50 uppercase">
+                <tr>
+                  <th class="p-2">Mês</th>
+                  <th class="p-2">Fixos</th>
+                  <th class="p-2">Parcelas</th>
+                  <th class="p-2 text-cyan-400">Total Combinado</th>
+                  <th class="p-2 text-emerald-400">Economia Liberada</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800">
+                <tr v-for="p in dados.projecao" :key="p.mes" class="hover:bg-slate-800/30">
+                  <td class="p-2 font-bold">{{ formatarMes(p.mes) }}</td>
+                  <td class="p-2">{{ formatarMoeda(p.total_fixo) }}</td>
+                  <td class="p-2">{{ formatarMoeda(p.total_parcelado) }}</td>
+                  <td class="p-2 font-bold text-cyan-400">{{ formatarMoeda(p.total_combinado) }}</td>
+                  <td class="p-2 font-bold text-emerald-400">+ {{ formatarMoeda(p.liberado_vs_atual) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- PAINEL DE CONTROLE DE FILTROS AVANÇADOS -->
+      <div class="card-cockpit p-5 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-2">
+            <span class="text-lg">🔍</span>
+            <h3 class="text-base font-bold text-white">Filtros & Consulta Livre</h3>
+          </div>
+          <div class="text-xs text-slate-400">
+            Exibindo <strong class="text-cyan-400">{{ despesasFiltradas.length }}</strong> de <strong>{{ dados.despesas.length }}</strong> despesas 
+            (Soma filtrada: <strong class="text-white">{{ formatarMoeda(totalFiltrado) }}</strong>)
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <!-- BUSCA TEXTUAL -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 mb-1">Buscar por Descrição:</label>
+            <input v-model="filtroBusca" type="text" placeholder="Ex: Notebook, Aluguel, Mercado..." 
+                   class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 transition" />
+          </div>
+
+          <!-- FILTRO POR CARTÃO / CATEGORIA COMPLETA -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 mb-1">Filtrar por Cartão / Categoria:</label>
+            <select v-model="filtroCategoria" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-cyan-400 outline-none focus:border-cyan-400 transition cursor-pointer">
+              <option value="">Todas as Categorias / Cartões</option>
+              <option v-for="cat in categoriasDisponiveis" :key="cat" :value="cat">{{ cat }}</option>
+            </select>
+          </div>
+
+          <!-- FILTRO POR TIPO -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 mb-1">Tipo de Despesa:</label>
+            <div class="flex bg-slate-900 p-1 rounded-lg border border-slate-700">
+              <button v-for="tipo in ['Todos', 'Fixa', 'Parcelada', 'Variavel']" :key="tipo"
+                      @click="filtroTipo = tipo"
+                      :class="['flex-1 text-xs py-1.5 rounded-md font-semibold transition', 
+                               filtroTipo === tipo ? 'bg-slate-800 text-cyan-400 shadow' : 'text-slate-400 hover:text-white']">
+                {{ tipo }}
+              </button>
+            </div>
+          </div>
+
+          <!-- ORDENAÇÃO -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 mb-1">Ordenar por:</label>
+            <select v-model="ordenacao" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 transition cursor-pointer">
+              <option value="maior_valor">Maior Valor (R$)</option>
+              <option value="menor_valor">Menor Valor (R$)</option>
+              <option value="descricao">Nome / Descrição (A-Z)</option>
+              <option value="vencimento">Data de Vencimento</option>
+            </select>
+          </div>
+        </div>
+
+        <div v-if="filtroBusca || filtroCategoria || filtroTipo !== 'Todos'" class="pt-2 flex items-center gap-2">
+          <span class="text-xs text-slate-500">Filtros ativos:</span>
+          <button @click="limparFiltros" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1 rounded-md border border-slate-700 transition">
+            ✖ Limpar Filtros
+          </button>
+        </div>
+      </div>
+
+      <!-- TABELA DE DESPESAS COM NOMES COMPLETOS -->
+      <div class="card-cockpit p-5">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-900/60 uppercase font-bold text-slate-400 border-b border-slate-800">
+              <tr>
+                <th class="p-3">Descrição da Despesa</th>
+                <th class="p-3">Cartão / Categoria Completa</th>
+                <th class="p-3">Subcategoria</th>
+                <th class="p-3">Classificação</th>
+                <th class="p-3">Vencimento</th>
+                <th class="p-3 text-right">Valor</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800">
+              <tr v-for="d in despesasFiltradas" :key="d.id" class="hover:bg-slate-800/40 transition">
+                <td class="p-3 font-medium text-white flex items-center gap-2">
+                  <span>{{ d.descricao }}</span>
+                  <span v-if="d.total_parcelas > 1" class="text-[10px] bg-slate-800 text-cyan-400 px-2 py-0.5 rounded border border-slate-700 font-bold">
+                    {{ d.parcela_atual }}/{{ d.total_parcelas }}
+                  </span>
+                </td>
+                <td class="p-3 font-semibold text-slate-200">
+                  <span class="bg-slate-900 px-2 py-1 rounded border border-slate-800">{{ d.categoria }}</span>
+                </td>
+                <td class="p-3 text-slate-400">{{ d.subcategoria }}</td>
+                <td class="p-3">
+                  <span :class="['px-2 py-0.5 rounded text-[10px] font-bold', 
+                               d.tipo_despesa === 'Fixa' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 
+                               d.tipo_despesa === 'Parcelada' ? 'bg-indigo-950 text-indigo-400 border border-indigo-800' : 
+                               'bg-pink-950 text-pink-400 border border-pink-800']">
+                    {{ d.tipo_despesa }}
+                  </span>
+                </td>
+                <td class="p-3 font-mono text-slate-400">{{ d.data_vencimento }}</td>
+                <td class="p-3 text-right font-bold text-white font-mono text-sm">{{ formatarMoeda(d.valor) }}</td>
+              </tr>
+              <tr v-if="despesasFiltradas.length === 0">
+                <td colspan="6" class="p-8 text-center text-slate-500">
+                  Nenhuma despesa encontrada para os filtros selecionados.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, computed, onMounted } = Vue;
+
+    createApp({
+      setup() {
+        const dados = ref({ vazio: true });
+        const meses = ref([]);
+        const mesSelecionado = ref('');
+        const carregando = ref(false);
+        const verDetalhesProjecao = ref(false);
+
+        // Estados de Filtros Livres
+        const filtroBusca = ref('');
+        const filtroCategoria = ref('');
+        const filtroTipo = ref('Todos');
+        const ordenacao = ref('maior_valor');
+
+        let chartCat = null;
+        let chartProj = null;
+
+        const formatarMoeda = (val) => Number(val || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        const formatarMes = (anoMes) => {
+          if (!anoMes) return '';
+          const [ano, mes] = anoMes.split('-');
+          const nomes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+          return `${nomes[parseInt(mes, 10) - 1]} / ${ano}`;
+        };
+
+        const categoriasDisponiveis = computed(() => {
+          if (!dados.value.despesas) return [];
+          const s = new Set(dados.value.despesas.map(d => d.categoria).filter(Boolean));
+          return Array.from(s).sort();
+        });
+
+        const despesasFiltradas = computed(() => {
+          if (!dados.value.despesas) return [];
+          return dados.value.despesas
+            .filter(d => {
+              const matchBusca = !filtroBusca.value || d.descricao.toLowerCase().includes(filtroBusca.value.toLowerCase());
+              const matchCat = !filtroCategoria.value || d.categoria === filtroCategoria.value;
+              const matchTipo = filtroTipo.value === 'Todos' || d.tipo_despesa === filtroTipo.value;
+              return matchBusca && matchCat && matchTipo;
+            })
+            .sort((a, b) => {
+              if (ordenacao.value === 'maior_valor') return b.valor - a.valor;
+              if (ordenacao.value === 'menor_valor') return a.valor - b.valor;
+              if (ordenacao.value === 'descricao') return a.descricao.localeCompare(b.descricao);
+              if (ordenacao.value === 'vencimento') return a.data_vencimento.localeCompare(b.data_vencimento);
+              return 0;
+            });
+        });
+
+        const totalFiltrado = computed(() => {
+          return despesasFiltradas.value.reduce((acc, d) => acc + d.valor, 0);
+        });
+
+        const limparFiltros = () => {
+          filtroBusca.value = '';
+          filtroCategoria.value = '';
+          filtroTipo.value = 'Todos';
+          ordenacao.value = 'maior_valor';
+        };
+
+        const renderizarGraficos = () => {
+          if (dados.value.vazio) return;
+
+          // 1. Gráfico de Categorias / Cartões com Nomes Completos
+          const ctxCat = document.getElementById('graficoCategorias');
+          if (ctxCat) {
+            if (chartCat) chartCat.destroy();
+            const topCats = dados.value.insights.ranking_categoria.slice(0, 8);
+            chartCat = new Chart(ctxCat, {
+              type: 'doughnut',
+              data: {
+                labels: topCats.map(c => c.categoria),
+                datasets: [{
+                  data: topCats.map(c => c.valor),
+                  backgroundColor: ['#00d2ff', '#10b981', '#6366f1', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6', '#64748b'],
+                  borderColor: '#0f172a',
+                  borderWidth: 2,
+                  hoverOffset: 6
+                }]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: { display: false },
+                  tooltip: {
+                    callbacks: {
+                      label: (c) => ` ${c.label}: ${formatarMoeda(c.parsed)}`
+                    }
+                  }
+                },
+                cutout: '70%'
+              }
+            });
+          }
+
+          // 2. Gráfico de Projeção Mês a Mês com Total Combinado destacado
+          const ctxProj = document.getElementById('graficoProjecao');
+          if (ctxProj) {
+            if (chartProj) chartProj.destroy();
+            const proj = dados.value.projecao;
+            chartProj = new Chart(ctxProj, {
+              data: {
+                labels: proj.map(p => formatarMes(p.mes)),
+                datasets: [
+                  {
+                    type: 'line',
+                    label: 'TOTAL COMBINADO',
+                    data: proj.map(p => p.total_combinado),
+                    borderColor: '#00d2ff',
+                    backgroundColor: '#00d2ff',
+                    borderWidth: 3,
+                    tension: 0.25,
+                    pointRadius: 5,
+                    pointHoverRadius: 7,
+                    pointBackgroundColor: '#ffffff',
+                    yAxisID: 'y'
+                  },
+                  {
+                    type: 'bar',
+                    label: 'Custos Fixos',
+                    data: proj.map(p => p.total_fixo),
+                    backgroundColor: '#10b981',
+                    borderRadius: 4,
+                    stack: 'gastos',
+                    yAxisID: 'y'
+                  },
+                  {
+                    type: 'bar',
+                    label: 'Parcelas Vivas',
+                    data: proj.map(p => p.total_parcelado),
+                    backgroundColor: '#6366f1',
+                    borderRadius: 4,
+                    stack: 'gastos',
+                    yAxisID: 'y'
+                  }
+                ]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                  x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', font: { size: 10 } } },
+                  y: { 
+                    grid: { color: '#1e293b' }, 
+                    ticks: { color: '#94a3b8', callback: v => 'R$ ' + Number(v).toLocaleString('pt-BR') }
+                  }
+                },
+                plugins: {
+                  legend: { labels: { color: '#94a3b8', boxWidth: 12 } },
+                  tooltip: {
+                    callbacks: {
+                      label: (ctx) => ` ${ctx.dataset.label}: ${formatarMoeda(ctx.parsed.y)}`
+                    }
+                  }
+                }
+              }
+            });
+          }
+        };
+
+        const carregarMeses = async () => {
+          const res = await fetch('/api/meses');
+          meses.value = await res.json();
+          if (meses.value.length > 0 && !mesSelecionado.value) {
+            mesSelecionado.value = meses.value[0];
+          }
+        };
+
+        const carregarDashboard = async () => {
+          carregando.value = true;
+          try {
+            const url = mesSelecionado.value ? `/api/dashboard?mes=${mesSelecionado.value}` : '/api/dashboard';
+            const res = await fetch(url);
+            dados.value = await res.json();
+            setTimeout(renderizarGraficos, 100);
+          } finally {
+            carregando.value = false;
+          }
+        };
+
+        const enviarPdf = async (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+
+          const formData = new FormData();
+          formData.append('arquivo', file);
+
+          carregando.value = true;
+          try {
+            const res = await fetch('/api/upload-pdf', { method: 'POST', body: formData });
+            if (!res.ok) {
+              const err = await res.json();
+              alert(err.detail || 'Erro ao carregar PDF.');
+              return;
+            }
+            const info = await res.json();
+            await carregarMeses();
+            mesSelecionado.value = info.mes_referencia;
+            await carregarDashboard();
+          } catch (err) {
+            alert('Falha ao processar arquivo: ' + err.message);
+          } finally {
+            carregando.value = false;
+          }
+        };
+
+        onMounted(async () => {
+          await carregarMeses();
+          await carregarDashboard();
+        });
+
+        return { 
+          dados, meses, mesSelecionado, carregando, verDetalhesProjecao,
+          filtroBusca, filtroCategoria, filtroTipo, ordenacao,
+          categoriasDisponiveis, despesasFiltradas, totalFiltrado, limparFiltros,
+          formatarMoeda, formatarMes, carregarDashboard, enviarPdf 
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
